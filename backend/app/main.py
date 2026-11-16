@@ -109,13 +109,31 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
                 score += sum(1.2 for term in ("why", "secret", "best", "never", "important", "because", "finally", "imagine", "actually", "how") if term in lower)
                 score += 0.7 if "?" in text or "!" in text else 0
                 center = (item["start"] + item["end"]) / 2
-                start = max(0, min(duration - clip_seconds, center - clip_seconds / 2))
-                candidates.append((score, start, text))
-            candidates.sort(reverse=True)
+                start = max(0, min(max(0, duration - clip_seconds), center - clip_seconds / 2))
+                clip_length = min(clip_seconds, duration - start)
+                captions = []
+                for spoken in transcript:
+                    cap_start = max(start, spoken["start"])
+                    cap_end = min(start + clip_length, spoken["end"])
+                    if cap_end - cap_start >= 0.35:
+                        captions.append({
+                            "start": round(cap_start - start, 3),
+                            "end": round(cap_end - start, 3),
+                            "text": spoken["text"]
+                        })
+                candidates.append((score, start, text, captions))
+            candidates.sort(key=lambda item: item[0], reverse=True)
             selected = []
-            for score, start, text in candidates:
+            for score, start, text, captions in candidates:
                 if all(abs(start - old["start"]) > clip_seconds * 0.8 for old in selected):
-                    selected.append({"start": start, "duration": min(clip_seconds, max(1, duration-start)), "title": text[:90], "score": round(score, 2)})
+                    selected.append({
+                        "start": start,
+                        "duration": min(clip_seconds, max(1, duration-start)),
+                        "title": text[:90],
+                        "score": round(score, 2),
+                        "captions": captions,
+                        "method": "transcript-ranking"
+                    })
                 if len(selected) >= count:
                     break
             if selected:
@@ -126,33 +144,41 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
     if duration <= 0:
         raise RuntimeError("Could not read the video duration.")
     total = min(count, max(1, int(duration // max(clip_seconds, 1))))
-    return [
-        {"start": max(0, min(duration-1, (duration * (i+1)/(total+1)) - clip_seconds/2)),
-         "duration": min(clip_seconds, duration), "title": f"Preview clip {i+1}", "score": 0,
-         "method": "evenly-spaced-fallback"}
-        for i in range(total)
-    ]
+    clips = []
+    for i in range(total):
+        start = max(0, min(max(0, duration-1), (duration * (i+1)/(total+1)) - clip_seconds/2))
+        clips.append({
+            "start": start,
+            "duration": min(clip_seconds, duration-start),
+            "title": f"Preview clip {i+1}",
+            "score": 0,
+            "captions": [],
+            "method": "evenly-spaced-fallback"
+        })
+    return clips
 
-
-def render_clip(source: Path, destination: Path, start: float, length: float, title: str):
-    # Burn a readable caption for the selected highlight into a vertical 9:16 export.
-    safe_title = re.sub(r"[^\w\s.,!?'-]", "", title)[:110]
+def render_clip(source: Path, destination: Path, start: float, length: float, title: str, captions: list[dict]):
+    # Burn timestamped transcript captions into a vertical 9:16 export.
     srt = destination.with_suffix(".srt")
-    end_ms = max(1000, int(length * 1000))
-    hours, remainder = divmod(end_ms, 3600000)
-    minutes, remainder = divmod(remainder, 60000)
-    seconds, millis = divmod(remainder, 1000)
-    end_timestamp = f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
-    srt.write_text(
-        f"1\n00:00:00,000 --> {end_timestamp}\n{safe_title}\n",
-        encoding="utf-8"
-    )
-    style = "FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=150"
-    vf = (
-        "scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,setsar=1,subtitles=" + str(srt) +
-        ":force_style='" + style + "'"
-    )
+    subtitle_filter = None
+    if captions:
+        entries = []
+        for index, caption in enumerate(captions, start=1):
+            start_ms = max(0, int(caption["start"] * 1000))
+            end_ms = max(start_ms + 250, int(caption["end"] * 1000))
+            def stamp(value):
+                hours, remainder = divmod(value, 3600000)
+                minutes, remainder = divmod(remainder, 60000)
+                seconds, millis = divmod(remainder, 1000)
+                return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+            text = re.sub(r"\s+", " ", caption["text"]).strip().replace("-->", "→")
+            entries.append(f"{index}\n{stamp(start_ms)} --> {stamp(end_ms)}\n{text}\n")
+        srt.write_text("\n".join(entries), encoding="utf-8")
+        style = "FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=150"
+        subtitle_filter = "subtitles=" + str(srt) + ":force_style='" + style + "'"
+    vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+    if subtitle_filter:
+        vf += "," + subtitle_filter
     run([
         "ffmpeg", "-y", "-ss", str(max(0, start)), "-i", str(source), "-t", str(length),
         "-vf", vf, "-r", "30", "-c:v", "libx264", "-preset", "ultrafast",
@@ -174,7 +200,7 @@ def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_secon
         for index, item in enumerate(highlights, start=1):
             update_job(job_id, progress=30 + int(60 * (index-1)/max(1,len(highlights))), message=f"Rendering clip {index} of {len(highlights)}")
             output = OUTPUTS / f"{job_id}-{index:02d}.mp4"
-            render_clip(source, output, item["start"], item["duration"], item["title"])
+            render_clip(source, output, item["start"], item["duration"], item["title"], item.get("captions", []))
             rendered.append({
                 "id": f"{job_id}-{index:02d}", "title": item["title"],
                 "start": round(item["start"], 2), "duration": round(item["duration"], 2),
