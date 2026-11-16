@@ -52,8 +52,10 @@ def run(command: list[str], timeout: Optional[int] = None):
 
 def download_url(url: str, destination: Path) -> Path:
     parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("Only public http/https video URLs are supported.")
+    host = (parsed.hostname or "").lower()
+    allowed_hosts = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}
+    if parsed.scheme != "https" or host not in allowed_hosts:
+        raise ValueError("For this first version, use a public YouTube or youtu.be HTTPS link.")
     options = {
         "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
         "merge_output_format": "mp4",
