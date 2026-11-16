@@ -1,21 +1,35 @@
 # ClipFlow
 
-Turn long videos into short-form clips for YouTube Shorts, Instagram Reels, and TikTok.
+A creator-focused workspace for turning long videos into vertical short-form clips for YouTube Shorts, Instagram Reels, and TikTok.
 
-## Status
+## What's in this first commit
 
-Early MVP scaffold. The dashboard UI is ready; video processing and publishing integrations are being added in stages.
+- Responsive dark dashboard with a violet visual identity
+- Animated hero, cards, hover states, and reduced-motion support
+- Upload picker with drag-and-drop and video-file validation
+- Public video URL input
+- Platform destination overview and workflow preview
 
 ## Run locally
+
+Requirements: Node.js 18 or newer.
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Current scope
+Open the local URL printed by Vite.
 
-- Upload a video or paste a public video URL
-- Review a clip-generation workflow
-- Animated dashboard with responsive layout
-- Export and publishing integrations are planned; platform API access and credentials will be required.
+## Important status
+
+This repository currently contains the **frontend preview only**. Video understanding, highlight detection, transcription, animated captions, rendering, persistent project storage, and official social-platform publishing are not implemented yet. The upload and URL controls validate/select a source locally; they do not claim to process or publish a video.
+
+These capabilities will be added in separate, testable stages. Publishing will depend on each platform's official API access and account eligibility.
+
+## Stack
+
+- React + Vite
+- Framer Motion
+- Lucide icons
+- Custom responsive CSS
