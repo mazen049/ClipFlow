@@ -1,4 +1,5 @@
 import os
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -201,7 +202,7 @@ def create_job(source: Path, count: int, clip_seconds: int):
 def health():
     missing = [tool for tool in ("ffmpeg", "ffprobe") if not shutil.which(tool)]
     return {"ok": not missing, "service": "ClipFlow API", "version": app.version, "missing_tools": missing,
-            "transcription_available": __import__("importlib").util.find_spec("faster_whisper") is not None}
+            "transcription_available": importlib.util.find_spec("faster_whisper") is not None}
 
 
 @app.post("/api/jobs/upload")
