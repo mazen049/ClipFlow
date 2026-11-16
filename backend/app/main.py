@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import shutil
@@ -10,7 +9,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import yt_dlp
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 
@@ -23,7 +22,7 @@ for folder in (UPLOADS, OUTPUTS):
 app = FastAPI(title="ClipFlow API", version="0.2.0", description="Local video-to-short processing API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -135,8 +134,8 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
 
 
 def render_clip(source: Path, destination: Path, start: float, length: float, title: str):
-    # Create a simple timed caption card from the selected transcript highlight.
-    safe_title = re.sub(r"[^\\w\\s.,!?'-]", "", title)[:110]
+    # Burn a readable caption for the selected highlight into a vertical 9:16 export.
+    safe_title = re.sub(r"[^\w\s.,!?'-]", "", title)[:110]
     srt = destination.with_suffix(".srt")
     end_ms = max(1000, int(length * 1000))
     hours, remainder = divmod(end_ms, 3600000)
@@ -144,16 +143,22 @@ def render_clip(source: Path, destination: Path, start: float, length: float, ti
     seconds, millis = divmod(remainder, 1000)
     end_timestamp = f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
     srt.write_text(
-        f"1\\n00:00:00,000 --> {end_timestamp}\\n{safe_title}\\n",
+        f"1\n00:00:00,000 --> {end_timestamp}\n{safe_title}\n",
         encoding="utf-8"
     )
-    vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,subtitles=" + str(srt)
+    style = "FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=150"
+    vf = (
+        "scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,setsar=1,subtitles=" + str(srt) +
+        ":force_style='" + style + "'"
+    )
     run([
         "ffmpeg", "-y", "-ss", str(max(0, start)), "-i", str(source), "-t", str(length),
-        "-vf", vf, "-r", "30", "-c:v", "libx264", "-preset", "veryfast",
-        "-crf", "24", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+        "-vf", vf, "-r", "30", "-c:v", "libx264", "-preset", "ultrafast",
+        "-crf", "26", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
         str(destination)
     ], timeout=1800)
+    srt.unlink(missing_ok=True)
     return destination
 
 def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_seconds: int):
@@ -200,7 +205,7 @@ def health():
 
 
 @app.post("/api/jobs/upload")
-async def upload_video(background_tasks: BackgroundTasks, file: UploadFile = File(...), count: int = 3, clip_seconds: int = 30):
+async def upload_video(file: UploadFile = File(...), count: int = 3, clip_seconds: int = 30):
     suffix = Path(file.filename or "video.mp4").suffix.lower()
     if suffix not in VIDEO_SUFFIXES:
         raise HTTPException(400, "Unsupported video format. Use MP4, MOV, MKV or WEBM.")
