@@ -5,11 +5,19 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      - CLIPFLOW_DATA=/app/data
-      - WHISPER_MODEL=tiny
+      CLIPFLOW_DATA: /app/data
+      WHISPER_MODEL: tiny
+      HF_HOME: /app/model_cache
     volumes:
       - clipflow_data:/app/data
+      - clipflow_models:/app/model_cache
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   clipflow_data:
+  clipflow_models:
