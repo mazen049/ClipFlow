@@ -31,6 +31,7 @@ app.add_middleware(
 
 JOBS: dict[str, dict] = {}
 LOCK = threading.Lock()
+ACTIVE_JOB: Optional[str] = None
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
 
 
@@ -211,13 +212,22 @@ def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_secon
     except Exception as exc:
         update_job(job_id, status="failed", progress=100, message=str(exc)[:1200])
     finally:
+        global ACTIVE_JOB
+        with LOCK:
+            if ACTIVE_JOB == job_id:
+                ACTIVE_JOB = None
         shutil.rmtree(workdir, ignore_errors=True)
 
 
 def create_job(source: Path, count: int, clip_seconds: int):
+    global ACTIVE_JOB
     job_id = uuid.uuid4().hex[:12]
     workdir = source.parent
     with LOCK:
+        if ACTIVE_JOB is not None:
+            shutil.rmtree(workdir, ignore_errors=True)
+            raise HTTPException(409, "ClipFlow is processing another video. Wait for it to finish, then try again.")
+        ACTIVE_JOB = job_id
         JOBS[job_id] = {"id": job_id, "status": "queued", "progress": 0, "message": "Waiting to start", "clips": []}
     thread = threading.Thread(target=process_job, args=(job_id, source, workdir, count, clip_seconds), daemon=True)
     thread.start()
