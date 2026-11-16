@@ -1,0 +1,15 @@
+services:
+  api:
+    build: ./backend
+    container_name: clipflow-api
+    ports:
+      - "8000:8000"
+    environment:
+      - CLIPFLOW_DATA=/app/data
+      - WHISPER_MODEL=tiny
+    volumes:
+      - clipflow_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  clipflow_data:
