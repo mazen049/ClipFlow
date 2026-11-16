@@ -135,17 +135,19 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
 
 
 def render_clip(source: Path, destination: Path, start: float, length: float, title: str):
-    # Crop to a centered 9:16 frame; subtitles are generated as an SRT sidecar.
-    safe_title = re.sub(r"[^\w\s.,!?'-]", "", title)[:110]
+    # Create a simple timed caption card from the selected transcript highlight.
+    safe_title = re.sub(r"[^\\w\\s.,!?'-]", "", title)[:110]
     srt = destination.with_suffix(".srt")
-    words = safe_title.split()
-    lines = [" ".join(words[i:i+7]) for i in range(0, len(words), 7)]
-    caption = "\\N".join(lines[:2]).replace("'", "\\'")
+    end_ms = max(1000, int(length * 1000))
+    hours, remainder = divmod(end_ms, 3600000)
+    minutes, remainder = divmod(remainder, 60000)
+    seconds, millis = divmod(remainder, 1000)
+    end_timestamp = f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
     srt.write_text(
-        "1\n00:00:00,000 --> 00:00:%02d,900\n%s\n" % (max(1, int(length)), safe_title),
+        f"1\\n00:00:00,000 --> {end_timestamp}\\n{safe_title}\\n",
         encoding="utf-8"
     )
-    vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+    vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,subtitles=" + str(srt)
     run([
         "ffmpeg", "-y", "-ss", str(max(0, start)), "-i", str(source), "-t", str(length),
         "-vf", vf, "-r", "30", "-c:v", "libx264", "-preset", "veryfast",
@@ -153,7 +155,6 @@ def render_clip(source: Path, destination: Path, start: float, length: float, ti
         str(destination)
     ], timeout=1800)
     return destination
-
 
 def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_seconds: int):
     try:
