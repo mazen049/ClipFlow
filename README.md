@@ -7,7 +7,8 @@ ClipFlow is a self-hosted starter project for turning a long video into vertical
 - Responsive React dashboard with a dark violet design and Framer Motion animations.
 - Video upload and public YouTube URL input.
 - FastAPI processing service with upload and job-status endpoints.
-- FFmpeg 9:16 vertical rendering and burned-in caption text.
+- FFmpeg 9:16 vertical rendering with an automatically selected visual preset.
+- Word-timed animated karaoke captions, using Whisper word timestamps when available.
 - Optional local transcription using faster-whisper (tiny model by default).
 - Transcript-based highlight ranking, with an explicitly labeled evenly-spaced fallback if transcription is unavailable.
 - Docker Compose setup for the processing API.
@@ -46,7 +47,8 @@ Your generated MP4 files are kept in the Docker volume named `clipflow_data`. `d
 This is an early local prototype, not a finished automatic clipping product.
 
 - Highlight selection is a simple transcript heuristic, not an advanced semantic video-understanding model. If transcription fails or no useful transcript is found, the service creates evenly spaced preview clips and labels them as such.
-- Captions currently show the selected transcript excerpt as a single timed caption, not animated word-by-word subtitles.
+- Automatic visual presets use transcript heuristics; they are not full scene-understanding or professional motion-graphics AI.
+- If Whisper does not return word timestamps for a segment, caption timing is estimated across that segment.
 - Jobs are held in memory; restarting the API loses their status.
 - URL input currently supports public HTTPS YouTube / youtu.be links only. Some videos cannot be downloaded because of platform restrictions, age/region restrictions, or extractor changes.
 - The dashboard and API run locally. There is no user account system or cloud hosting.

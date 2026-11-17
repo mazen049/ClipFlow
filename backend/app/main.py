@@ -104,44 +104,84 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
     try:
         from faster_whisper import WhisperModel
         model = WhisperModel(os.getenv("WHISPER_MODEL", "tiny"), device="cpu", compute_type="int8")
-        segments, _ = model.transcribe(str(path), vad_filter=True, word_timestamps=False)
+        segments, _ = model.transcribe(
+            str(path), vad_filter=True, word_timestamps=True
+        )
         transcript = []
         for seg in segments:
             text = re.sub(r"\s+", " ", seg.text).strip()
-            if text:
-                transcript.append({"start": float(seg.start), "end": float(seg.end), "text": text})
+            if not text:
+                continue
+            words = []
+            for spoken_word in (seg.words or []):
+                word_text = re.sub(r"\s+", " ", (spoken_word.word or "")).strip()
+                word_start = spoken_word.start
+                word_end = spoken_word.end
+                if word_text and word_start is not None and word_end is not None and word_end > word_start:
+                    words.append({
+                        "start": float(word_start),
+                        "end": float(word_end),
+                        "text": word_text
+                    })
+            # Keep captions available on Whisper versions/languages that omit word timings.
+            if not words:
+                tokens = re.findall(r"\S+", text)
+                segment_start = float(seg.start)
+                segment_end = float(seg.end)
+                segment_length = max(0.1, segment_end - segment_start)
+                for index, token in enumerate(tokens):
+                    words.append({
+                        "start": segment_start + segment_length * index / len(tokens),
+                        "end": segment_start + segment_length * (index + 1) / len(tokens),
+                        "text": token
+                    })
+            transcript.append({
+                "start": float(seg.start),
+                "end": float(seg.end),
+                "text": text,
+                "words": words
+            })
+
         if transcript:
             candidates = []
             for item in transcript:
                 text = item["text"]
-                words = len(text.split())
-                if item["end"] - item["start"] < 1.2 or words < 4:
+                words_count = len(text.split())
+                if item["end"] - item["start"] < 1.2 or words_count < 4:
                     continue
                 lower = text.lower()
-                score = min(words, 28) / 8
-                score += sum(1.2 for term in ("why", "secret", "best", "never", "important", "because", "finally", "imagine", "actually", "how") if term in lower)
+                score = min(words_count, 28) / 8
+                score += sum(
+                    1.2 for term in (
+                        "why", "secret", "best", "never", "important",
+                        "because", "finally", "imagine", "actually", "how"
+                    ) if term in lower
+                )
                 score += 0.7 if "?" in text or "!" in text else 0
                 center = (item["start"] + item["end"]) / 2
                 start = max(0, min(max(0, duration - clip_seconds), center - clip_seconds / 2))
                 clip_length = min(clip_seconds, duration - start)
                 captions = []
                 for spoken in transcript:
-                    cap_start = max(start, spoken["start"])
-                    cap_end = min(start + clip_length, spoken["end"])
-                    if cap_end - cap_start >= 0.35:
-                        captions.append({
-                            "start": round(cap_start - start, 3),
-                            "end": round(cap_end - start, 3),
-                            "text": spoken["text"]
-                        })
+                    for word in spoken["words"]:
+                        cap_start = max(start, word["start"])
+                        cap_end = min(start + clip_length, word["end"])
+                        if cap_end - cap_start >= 0.04:
+                            captions.append({
+                                "start": round(cap_start - start, 3),
+                                "end": round(cap_end - start, 3),
+                                "text": word["text"]
+                            })
+                captions.sort(key=lambda caption: caption["start"])
                 candidates.append((score, start, text, captions))
+
             candidates.sort(key=lambda item: item[0], reverse=True)
             selected = []
             for score, start, text, captions in candidates:
                 if all(abs(start - old["start"]) > clip_seconds * 0.8 for old in selected):
                     selected.append({
                         "start": start,
-                        "duration": min(clip_seconds, max(1, duration-start)),
+                        "duration": min(clip_seconds, max(1, duration - start)),
                         "title": text[:90],
                         "score": round(score, 2),
                         "captions": captions,
@@ -153,52 +193,158 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
                 return selected
     except Exception as exc:
         print(f"Transcription/highlight fallback: {exc}")
+
     # Fallback: evenly spaced preview clips. Clearly labeled as non-AI fallback.
     if duration <= 0:
         raise RuntimeError("Could not read the video duration.")
     total = min(count, max(1, int(duration // max(clip_seconds, 1))))
     clips = []
     for i in range(total):
-        start = max(0, min(max(0, duration-1), (duration * (i+1)/(total+1)) - clip_seconds/2))
+        start = max(0, min(max(0, duration - 1), (duration * (i + 1) / (total + 1)) - clip_seconds / 2))
         clips.append({
             "start": start,
-            "duration": min(clip_seconds, duration-start),
-            "title": f"Preview clip {i+1}",
+            "duration": min(clip_seconds, duration - start),
+            "title": f"Preview clip {i + 1}",
             "score": 0,
             "captions": [],
             "method": "evenly-spaced-fallback"
         })
     return clips
 
-def render_clip(source: Path, destination: Path, start: float, length: float, title: str, captions: list[dict]):
-    # Burn timestamped transcript captions into a vertical 9:16 export.
-    srt = destination.with_suffix(".srt")
+
+def choose_auto_style(text: str) -> dict:
+    """Choose a deterministic caption/colour preset from the detected transcript."""
+    lower = text.lower()
+    energetic_terms = (
+        "wow", "secret", "never", "amazing", "shocking", "insane",
+        "must", "stop", "unbelievable", "finally", "why", "how"
+    )
+    if "!" in text or "?" in text or any(term in lower for term in energetic_terms):
+        return {
+            "name": "bold",
+            "font_size": 64,
+            "primary": "&H0000D7FF",
+            "outline": 5,
+            "margin_v": 175,
+            "saturation": "1.08",
+            "contrast": "1.05"
+        }
+    if len(text.split()) >= 18:
+        return {
+            "name": "story",
+            "font_size": 54,
+            "primary": "&H00D6B6FF",
+            "outline": 4,
+            "margin_v": 190,
+            "saturation": "0.96",
+            "contrast": "1.04"
+        }
+    return {
+        "name": "clean",
+        "font_size": 58,
+        "primary": "&H00E6F0FF",
+        "outline": 4,
+        "margin_v": 165,
+        "saturation": "1.02",
+        "contrast": "1.03"
+    }
+
+
+def ass_timestamp(seconds: float) -> str:
+    centiseconds = max(0, int(round(seconds * 100)))
+    hours, remainder = divmod(centiseconds, 360000)
+    minutes, remainder = divmod(remainder, 6000)
+    whole_seconds, fraction = divmod(remainder, 100)
+    return f"{hours}:{minutes:02d}:{whole_seconds:02d}.{fraction:02d}"
+
+
+def ass_safe_text(value: str) -> str:
+    return (
+        re.sub(r"\s+", " ", value)
+        .replace("\\", "/")
+        .replace("{", "(")
+        .replace("}", ")")
+        .strip()
+    )
+
+
+def write_word_subtitles(destination: Path, captions: list[dict], style: dict):
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "PlayResX: 1080\n"
+        "PlayResY: 1920\n"
+        "WrapStyle: 2\n"
+        "ScaledBorderAndShadow: yes\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
+        "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Default,DejaVu Sans,{style['font_size']},{style['primary']},&H00FFFFFF,"
+        f"&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,{style['outline']},2,2,70,70,{style['margin_v']},1\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+    valid = []
+    for caption in captions:
+        text = ass_safe_text(str(caption.get("text", "")))
+        start = max(0.0, float(caption.get("start", 0)))
+        end = max(start + 0.04, float(caption.get("end", start + 0.12)))
+        if text:
+            valid.append({"text": text, "start": start, "end": end})
+
+    events = []
+    # Group a few timed words into a readable caption line. Karaoke timing
+    # highlights each word in sequence while preserving the sentence context.
+    for offset in range(0, len(valid), 6):
+        group = valid[offset:offset + 6]
+        if not group:
+            continue
+        pieces = []
+        for word in group:
+            start_cs = max(0, int(round((word["start"] - group[0]["start"]) * 100)))
+            duration_cs = max(1, int(round((word["end"] - word["start"]) * 100)))
+            pieces.append(f"{{\\kt{start_cs}\\kf{duration_cs}}}{word['text']}")
+        events.append(
+            f"Dialogue: 0,{ass_timestamp(group[0]['start'])},{ass_timestamp(group[-1]['end'])},"
+            f"Default,,0,0,0,,{' '.join(pieces)}"
+        )
+    destination.write_text(header + "\n".join(events) + "\n", encoding="utf-8-sig")
+
+
+def render_clip(
+    source: Path,
+    destination: Path,
+    start: float,
+    length: float,
+    title: str,
+    captions: list[dict],
+    style: dict
+):
+    # Render a vertical 9:16 clip with timed, word-by-word karaoke captions.
+    subtitle_file = destination.with_suffix(".ass")
     subtitle_filter = None
     if captions:
-        entries = []
-        for index, caption in enumerate(captions, start=1):
-            start_ms = max(0, int(caption["start"] * 1000))
-            end_ms = max(start_ms + 250, int(caption["end"] * 1000))
-            def stamp(value):
-                hours, remainder = divmod(value, 3600000)
-                minutes, remainder = divmod(remainder, 60000)
-                seconds, millis = divmod(remainder, 1000)
-                return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
-            text = re.sub(r"\s+", " ", caption["text"]).strip().replace("-->", "→")
-            entries.append(f"{index}\n{stamp(start_ms)} --> {stamp(end_ms)}\n{text}\n")
-        srt.write_text("\n".join(entries), encoding="utf-8")
-        style = "FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=150"
-        subtitle_filter = "subtitles=" + str(srt) + ":force_style='" + style + "'"
-    vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+        write_word_subtitles(subtitle_file, captions, style)
+        subtitle_filter = "subtitles=" + subtitle_file.as_posix()
+
+    vf = (
+        "scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,setsar=1,"
+        f"eq=saturation={style['saturation']}:contrast={style['contrast']}"
+    )
     if subtitle_filter:
         vf += "," + subtitle_filter
-    run([
-        "ffmpeg", "-y", "-ss", str(max(0, start)), "-i", str(source), "-t", str(length),
-        "-vf", vf, "-r", "30", "-c:v", "libx264", "-preset", "ultrafast",
-        "-crf", "26", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
-        str(destination)
-    ], timeout=1800)
-    srt.unlink(missing_ok=True)
+
+    try:
+        run([
+            "ffmpeg", "-y", "-ss", str(max(0, start)), "-i", str(source), "-t", str(length),
+            "-vf", vf, "-r", "30", "-c:v", "libx264", "-preset", "ultrafast",
+            "-crf", "25", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
+            str(destination)
+        ], timeout=1800)
+    finally:
+        subtitle_file.unlink(missing_ok=True)
     return destination
 
 def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_seconds: int):
@@ -213,11 +359,14 @@ def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_secon
         for index, item in enumerate(highlights, start=1):
             update_job(job_id, progress=30 + int(60 * (index-1)/max(1,len(highlights))), message=f"Rendering clip {index} of {len(highlights)}")
             output = OUTPUTS / f"{job_id}-{index:02d}.mp4"
-            render_clip(source, output, item["start"], item["duration"], item["title"], item.get("captions", []))
+            style = choose_auto_style(item["title"])
+            render_clip(source, output, item["start"], item["duration"], item["title"], item.get("captions", []), style)
             rendered.append({
                 "id": f"{job_id}-{index:02d}", "title": item["title"],
                 "start": round(item["start"], 2), "duration": round(item["duration"], 2),
                 "method": item.get("method", "transcript-ranking"),
+                "style": style["name"],
+                "caption_mode": "word-by-word" if item.get("captions") else "none",
                 "url": f"/api/clips/{output.name}"
             })
         update_job(job_id, status="completed", progress=100, message="Clips are ready", clips=rendered)
