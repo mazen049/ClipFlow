@@ -302,8 +302,9 @@ def write_word_subtitles(destination: Path, captions: list[dict], style: dict):
             continue
         pieces = []
         for word in group:
+            start_cs = max(0, int(round((word["start"] - group[0]["start"]) * 100)))
             duration_cs = max(1, int(round((word["end"] - word["start"]) * 100)))
-            pieces.append(f"{{\\kf{duration_cs}}}{word['text']}")
+            pieces.append(f"{{\\kt{start_cs}\\kf{duration_cs}}}{word['text']}")
         events.append(
             f"Dialogue: 0,{ass_timestamp(group[0]['start'])},{ass_timestamp(group[-1]['end'])},"
             f"Default,,0,0,0,,{' '.join(pieces)}"
