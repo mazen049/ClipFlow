@@ -88,7 +88,7 @@ def video_duration(path: Path) -> float:
     return max(0.0, float(output.strip()))
 
 
-def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int):
+def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int, video_type: str = "auto"):
     try:
         from faster_whisper import WhisperModel
         model = WhisperModel(os.getenv("WHISPER_MODEL", "tiny"), device="cpu", compute_type="int8")
@@ -109,6 +109,8 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
                 score = min(words, 28) / 8
                 score += sum(1.2 for term in ("why", "secret", "best", "never", "important", "because", "finally", "imagine", "actually", "how") if term in lower)
                 score += 0.7 if "?" in text or "!" in text else 0
+                type_terms = {"podcast": ("think", "opinion", "question", "experience", "story"), "gaming": ("game", "level", "player", "win", "match", "boss"), "educational": ("learn", "explain", "because", "example", "step", "how"), "motivation": ("goal", "success", "努力", "believe", "never give up", "努力"), "story": ("then", "suddenly", "one day", "story", "finally", "after")}
+                score += sum(0.8 for term in type_terms.get(video_type, ()) if term in lower)
                 center = (item["start"] + item["end"]) / 2
                 start = max(0, min(max(0, duration - clip_seconds), center - clip_seconds / 2))
                 clip_length = min(clip_seconds, duration - start)
@@ -158,11 +160,11 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
         })
     return clips
 
-def render_clip(source: Path, destination: Path, start: float, length: float, title: str, captions: list[dict]):
-    # Burn timestamped transcript captions into a vertical 9:16 export.
+def render_clip(source: Path, destination: Path, start: float, length: float, title: str, captions: list[dict], aspect_ratio: str = "9:16", captions_enabled: bool = True):
+    # Render the selected output ratio and optionally burn transcript captions.
     srt = destination.with_suffix(".srt")
     subtitle_filter = None
-    if captions:
+    if captions_enabled and captions:
         entries = []
         for index, caption in enumerate(captions, start=1):
             start_ms = max(0, int(caption["start"] * 1000))
@@ -177,7 +179,9 @@ def render_clip(source: Path, destination: Path, start: float, length: float, ti
         srt.write_text("\n".join(entries), encoding="utf-8")
         style = "FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=150"
         subtitle_filter = "subtitles=" + str(srt) + ":force_style='" + style + "'"
-    vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+    dimensions = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
+    width, height = dimensions.get(aspect_ratio, (1080, 1920))
+    vf = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1"
     if subtitle_filter:
         vf += "," + subtitle_filter
     run([
@@ -189,19 +193,19 @@ def render_clip(source: Path, destination: Path, start: float, length: float, ti
     srt.unlink(missing_ok=True)
     return destination
 
-def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_seconds: int):
+def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_seconds: int, aspect_ratio: str, captions_enabled: bool, video_type: str):
     try:
         update_job(job_id, status="processing", progress=10, message="Reading video metadata")
         duration = video_duration(source)
         if duration < 3:
             raise ValueError("The video is too short to create a clip.")
         update_job(job_id, progress=25, message="Finding candidate moments")
-        highlights = choose_highlights(source, duration, count, clip_seconds)
+        highlights = choose_highlights(source, duration, count, clip_seconds, video_type)
         rendered = []
         for index, item in enumerate(highlights, start=1):
             update_job(job_id, progress=30 + int(60 * (index-1)/max(1,len(highlights))), message=f"Rendering clip {index} of {len(highlights)}")
             output = OUTPUTS / f"{job_id}-{index:02d}.mp4"
-            render_clip(source, output, item["start"], item["duration"], item["title"], item.get("captions", []))
+            render_clip(source, output, item["start"], item["duration"], item["title"], item.get("captions", []), aspect_ratio, captions_enabled)
             rendered.append({
                 "id": f"{job_id}-{index:02d}", "title": item["title"],
                 "start": round(item["start"], 2), "duration": round(item["duration"], 2),
@@ -219,7 +223,7 @@ def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_secon
         shutil.rmtree(workdir, ignore_errors=True)
 
 
-def create_job(source: Path, count: int, clip_seconds: int):
+def create_job(source: Path, count: int, clip_seconds: int, aspect_ratio: str, captions_enabled: bool, video_type: str):
     global ACTIVE_JOB
     job_id = uuid.uuid4().hex[:12]
     workdir = source.parent
@@ -229,7 +233,7 @@ def create_job(source: Path, count: int, clip_seconds: int):
             raise HTTPException(409, "ClipFlow is processing another video. Wait for it to finish, then try again.")
         ACTIVE_JOB = job_id
         JOBS[job_id] = {"id": job_id, "status": "queued", "progress": 0, "message": "Waiting to start", "clips": []}
-    thread = threading.Thread(target=process_job, args=(job_id, source, workdir, count, clip_seconds), daemon=True)
+    thread = threading.Thread(target=process_job, args=(job_id, source, workdir, count, clip_seconds, aspect_ratio, captions_enabled, video_type), daemon=True)
     thread.start()
     return JOBS[job_id]
 
@@ -242,12 +246,16 @@ def health():
 
 
 @app.post("/api/jobs/upload")
-async def upload_video(file: UploadFile = File(...), count: int = 3, clip_seconds: int = 30):
+async def upload_video(file: UploadFile = File(...), count: int = 3, clip_seconds: int = 30, aspect_ratio: str = "9:16", captions: bool = True, video_type: str = "auto"):
     suffix = Path(file.filename or "video.mp4").suffix.lower()
     if suffix not in VIDEO_SUFFIXES:
         raise HTTPException(400, "Unsupported video format. Use MP4, MOV, MKV or WEBM.")
     if not 1 <= count <= 8 or not 10 <= clip_seconds <= 90:
         raise HTTPException(400, "Choose 1–8 clips and a clip length from 10 to 90 seconds.")
+    if aspect_ratio not in {"9:16", "16:9", "1:1"}:
+        raise HTTPException(400, "Choose 9:16, 16:9 or 1:1 aspect ratio.")
+    if video_type not in {"auto", "podcast", "gaming", "educational", "motivation", "story"}:
+        raise HTTPException(400, "Choose a supported video type or Auto detect.")
     workdir = UPLOADS / uuid.uuid4().hex
     workdir.mkdir(parents=True, exist_ok=True)
     source = workdir / f"source{suffix}"
@@ -265,11 +273,11 @@ async def upload_video(file: UploadFile = File(...), count: int = 3, clip_second
     if size == 0:
         shutil.rmtree(workdir, ignore_errors=True)
         raise HTTPException(400, "The uploaded file is empty.")
-    return create_job(source, count, clip_seconds)
+    return create_job(source, count, clip_seconds, aspect_ratio, captions, video_type)
 
 
 @app.post("/api/jobs/url")
-def url_job(payload: UrlJob, count: int = 3, clip_seconds: int = 30):
+def url_job(payload: UrlJob, count: int = 3, clip_seconds: int = 30, aspect_ratio: str = "9:16", captions: bool = True, video_type: str = "auto"):
     if not 1 <= count <= 8 or not 10 <= clip_seconds <= 90:
         raise HTTPException(400, "Choose 1–8 clips and a clip length from 10 to 90 seconds.")
     workdir = UPLOADS / uuid.uuid4().hex
