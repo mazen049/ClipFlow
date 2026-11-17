@@ -1,5 +1,7 @@
 import os
 import importlib.util
+import ipaddress
+import socket
 import re
 import shutil
 import subprocess
@@ -55,8 +57,18 @@ def download_url(url: str, destination: Path) -> Path:
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     allowed_hosts = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}
-    if parsed.scheme != "https" or host not in allowed_hosts:
-        raise ValueError("For this first version, use a public YouTube or youtu.be HTTPS link.")
+    if (parsed.scheme != "https" or host not in allowed_hosts or
+            parsed.username or parsed.password or parsed.port not in (None, 443)):
+        raise ValueError("For this version, use a public YouTube or youtu.be HTTPS link on port 443.")
+    # Reduce SSRF risk: reject hostnames that resolve to private, loopback,
+    # link-local, multicast, or otherwise non-public IP addresses.
+    try:
+        addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError("Could not resolve the YouTube hostname.") from exc
+    resolved = {item[4][0] for item in addresses}
+    if not resolved or any(not ipaddress.ip_address(address).is_global for address in resolved):
+        raise ValueError("The video URL resolved to a non-public network address.")
     options = {
         "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
         "merge_output_format": "mp4",
@@ -221,7 +233,7 @@ def process_job(job_id: str, source: Path, workdir: Path, count: int, clip_secon
 
 def create_job(source: Path, count: int, clip_seconds: int):
     global ACTIVE_JOB
-    job_id = uuid.uuid4().hex[:12]
+    job_id = uuid.uuid4().hex
     workdir = source.parent
     with LOCK:
         if ACTIVE_JOB is not None:
@@ -265,6 +277,14 @@ async def upload_video(file: UploadFile = File(...), count: int = 3, clip_second
     if size == 0:
         shutil.rmtree(workdir, ignore_errors=True)
         raise HTTPException(400, "The uploaded file is empty.")
+    # Confirm that the uploaded bytes are a readable video before queuing work.
+    try:
+        video_duration(source)
+    except Exception:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise HTTPException(400, "The uploaded file is not a readable video.")
+    finally:
+        await file.close()
     return create_job(source, count, clip_seconds)
 
 
