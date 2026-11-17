@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: clipflow-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: CLIPFLOW_DATA
+        value: /tmp/clipflow-data
+      - key: WHISPER_MODEL
+        value: tiny
+      - key: CORS_ORIGINS
+        value: https://mazen049.github.io,http://localhost:5173,http://127.0.0.1:5173
