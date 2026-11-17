@@ -1,9 +1,9 @@
 services:
   api:
     build: ./backend
-    container_name: clipflow-api
+    container_name: clipflow-auto-api
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8001:8000"
     environment:
       CLIPFLOW_DATA: /app/data
       WHISPER_MODEL: tiny
