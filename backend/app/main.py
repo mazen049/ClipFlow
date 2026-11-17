@@ -280,6 +280,10 @@ async def upload_video(file: UploadFile = File(...), count: int = 3, clip_second
 def url_job(payload: UrlJob, count: int = 3, clip_seconds: int = 30, aspect_ratio: str = "9:16", captions: bool = True, video_type: str = "auto"):
     if not 1 <= count <= 8 or not 10 <= clip_seconds <= 90:
         raise HTTPException(400, "Choose 1–8 clips and a clip length from 10 to 90 seconds.")
+    if aspect_ratio not in {"9:16", "16:9", "1:1"}:
+        raise HTTPException(400, "Choose 9:16, 16:9 or 1:1 aspect ratio.")
+    if video_type not in {"auto", "podcast", "gaming", "educational", "motivation", "story"}:
+        raise HTTPException(400, "Choose a supported video type or Auto detect.")
     workdir = UPLOADS / uuid.uuid4().hex
     workdir.mkdir(parents=True, exist_ok=True)
     try:
@@ -287,7 +291,7 @@ def url_job(payload: UrlJob, count: int = 3, clip_seconds: int = 30, aspect_rati
     except Exception as exc:
         shutil.rmtree(workdir, ignore_errors=True)
         raise HTTPException(400, f"Could not download this URL: {str(exc)[:500]}")
-    return create_job(source, count, clip_seconds)
+    return create_job(source, count, clip_seconds, aspect_ratio, captions, video_type)
 
 
 @app.get("/api/jobs/{job_id}")
