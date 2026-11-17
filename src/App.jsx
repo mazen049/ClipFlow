@@ -28,15 +28,16 @@ function App(){
  const API_BASE=cleanUrl(apiBase)
 
  useEffect(()=>{ if(API_BASE) checkApi(); else setApiStatus('not-configured') },[])
- const checkApi=async()=>{
-   if(!API_BASE){setApiStatus('not-configured');return}
+ const checkApi=async(base=API_BASE)=>{
+   const target=cleanUrl(base)
+   if(!target){setApiStatus('not-configured');return}
    setApiStatus('checking')
-   try { const r=await fetch(API_BASE+'/api/health'); if(!r.ok) throw new Error('API response error'); const d=await r.json(); setApiStatus(d.ok?'online':'error'); return d }
+   try { const r=await fetch(target+'/api/health'); if(!r.ok) throw new Error('API response error'); const d=await r.json(); setApiStatus(d.ok?'online':'error'); return d }
    catch { setApiStatus('offline'); return null }
  }
  const saveSettings=()=>{
    localStorage.setItem('clipflow-settings',JSON.stringify({apiBase:cleanUrl(apiBase),count,clipSeconds}))
-   setApiBase(cleanUrl(apiBase));setSettingsOpen(false);setNotice('Settings saved on this browser.');checkApi()
+   setApiBase(cleanUrl(apiBase));setSettingsOpen(false);setNotice('Settings saved on this browser.');checkApi(cleanUrl(apiBase))
  }
  const chooseFile=f=>{if(!f)return;if(!f.type.startsWith('video/')){setNotice('Please choose a video file.');return}setFile(f);setNotice('Video selected and ready.')}
  const start=async()=>{
@@ -88,7 +89,7 @@ function App(){
       <div className="source-tabs"><button className={source==='upload'?'selected':''} onClick={()=>setSource('upload')}><Upload size={15}/> Upload video</button><button className={source==='link'?'selected':''} onClick={()=>setSource('link')}><Link2 size={15}/> Paste a link</button></div>
       <div className="processing-options"><label>Number of clips<select value={count} onChange={e=>setCount(Number(e.target.value))}><option value={1}>1 clip</option><option value={2}>2 clips</option><option value={3}>3 clips</option><option value={4}>4 clips</option><option value={5}>5 clips</option><option value={6}>6 clips</option><option value={7}>7 clips</option><option value={8}>8 clips</option></select></label><label>Clip duration<select value={clipSeconds} onChange={e=>setClipSeconds(Number(e.target.value))}><option value={10}>10 seconds</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option><option value={60}>60 seconds</option><option value={90}>90 seconds</option></select></label></div>
       {source==='upload'?<div className={'dropzone '+(file?'has-file':'')} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();chooseFile(e.dataTransfer.files?.[0])}} onClick={()=>inputRef.current?.click()}><input ref={inputRef} type="file" accept="video/*" hidden onChange={e=>chooseFile(e.target.files?.[0])}/><div className="upload-icon">{file?<Check size={22}/>:<CloudUpload size={23}/>}</div><b>{file?file.name:'Drag & drop your video here'}</b><span>{file?(file.size/1024/1024).toFixed(1)+' MB · Ready to process':'or click to browse files'}</span><small>MP4, MOV, MKV, WEBM</small></div>:<div className="link-field"><div className="link-icon"><Link2 size={18}/></div><input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://youtube.com/watch?v=..."/><button onClick={start}>Use link <ArrowUpRight size={14}/></button></div>}
-      <div className="card-footer"><div className="secure-note"><span className="secure-dot"/>{API_BASE?'Connected API: '+new URL(API_BASE).host:'Set processing API in Settings'}</div><button className="primary-button" onClick={start} disabled={busy}>{busy?'Processing…':<>Create clips <ArrowUpRight size={16}/></>}</button></div>
+      <div className="card-footer"><div className="secure-note"><span className="secure-dot"/>{API_BASE?'Connected API: '+API_BASE:'Set processing API in Settings'}</div><button className="primary-button" onClick={start} disabled={busy}>{busy?'Processing…':<>Create clips <ArrowUpRight size={16}/></>}</button></div>
       {notice&&<motion.div className="notice"><span>{notice}</span><button onClick={()=>setNotice('')}><X size={14}/></button></motion.div>}
       {job&&<div className="job-status"><div className="job-status-top"><b>{job.message}</b><span>{job.progress}%</span></div><div className="progress-track"><i style={{width:job.progress+'%'}}/></div>{job.status==='completed'&&<div className="clip-results">{job.clips.map(clip=><div className="clip-result" key={clip.id}><div><b>{clip.title}</b><small>{clip.duration}s · {clip.method==='evenly-spaced-fallback'?'Preview selection':'Transcript-ranked highlight'}</small></div><a href={API_BASE+clip.url} target="_blank" rel="noreferrer">Download <ArrowUpRight size={13}/></a></div>)}</div>}</div>}
      </motion.section>
