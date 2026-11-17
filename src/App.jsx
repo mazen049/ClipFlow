@@ -21,6 +21,9 @@ function App(){
  const [projects,setProjects]=useState([])
  const [count,setCount]=useState(Number(saved.count)||3)
  const [clipSeconds,setClipSeconds]=useState(Number(saved.clipSeconds)||30)
+ const [aspectRatio,setAspectRatio]=useState(saved.aspectRatio||'9:16')
+ const [captions,setCaptions]=useState(saved.captions!==false)
+ const [videoType,setVideoType]=useState(saved.videoType||'auto')
  const [apiBase,setApiBase]=useState(saved.apiBase||'')
  const [apiStatus,setApiStatus]=useState('unknown')
  const [settingsOpen,setSettingsOpen]=useState(false)
@@ -36,7 +39,7 @@ function App(){
    catch { setApiStatus('offline'); return null }
  }
  const saveSettings=()=>{
-   localStorage.setItem('clipflow-settings',JSON.stringify({apiBase:cleanUrl(apiBase),count,clipSeconds}))
+   localStorage.setItem('clipflow-settings',JSON.stringify({apiBase:cleanUrl(apiBase),count,clipSeconds,aspectRatio,captions,videoType}))
    setApiBase(cleanUrl(apiBase));setSettingsOpen(false);setNotice('Settings saved on this browser.');checkApi(cleanUrl(apiBase))
  }
  const chooseFile=f=>{if(!f)return;if(!f.type.startsWith('video/')){setNotice('Please choose a video file.');return}setFile(f);setNotice('Video selected and ready.')}
@@ -48,8 +51,8 @@ function App(){
    setBusy(true);setJob(null);setNotice('Connecting to ClipFlow processing service…')
    try{
      let response
-     if(source==='upload'){const data=new FormData();data.append('file',file);response=await fetch(API_BASE+`/api/jobs/upload?count=${count}&clip_seconds=${clipSeconds}`,{method:'POST',body:data})}
-     else{response=await fetch(API_BASE+`/api/jobs/url?count=${count}&clip_seconds=${clipSeconds}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})})}
+     if(source==='upload'){const data=new FormData();data.append('file',file);response=await fetch(API_BASE+`/api/jobs/upload?count=${count}&clip_seconds=${clipSeconds}&aspect_ratio=${encodeURIComponent(aspectRatio)}&captions=${captions}&video_type=${encodeURIComponent(videoType)}`,{method:'POST',body:data})}
+     else{response=await fetch(API_BASE+`/api/jobs/url?count=${count}&clip_seconds=${clipSeconds}&aspect_ratio=${encodeURIComponent(aspectRatio)}&captions=${captions}&video_type=${encodeURIComponent(videoType)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})})}
      if(!response.ok)throw new Error((await response.json()).detail||'Could not start the job')
      let current=await response.json();setJob(current);setNotice('Processing started.')
      while(current.status==='queued'||current.status==='processing'){
@@ -87,7 +90,7 @@ function App(){
      <section className="section-heading"><div><div className="eyebrow">LET'S GET STARTED</div><h2>Create your clips</h2><p>Upload a video or paste a public YouTube link.</p></div><span className="step-tag"><span>01</span> New project</span></section>
      <motion.section className="create-card"><div className="card-top"><div className="card-icon"><WandSparkles size={19}/></div><div><h3>Start with a video</h3><p>Choose a source and adjust your clip settings.</p></div><span className="beta-tag">STUDIO</span></div>
       <div className="source-tabs"><button className={source==='upload'?'selected':''} onClick={()=>setSource('upload')}><Upload size={15}/> Upload video</button><button className={source==='link'?'selected':''} onClick={()=>setSource('link')}><Link2 size={15}/> Paste a link</button></div>
-      <div className="processing-options"><label>Number of clips<select value={count} onChange={e=>setCount(Number(e.target.value))}><option value={1}>1 clip</option><option value={2}>2 clips</option><option value={3}>3 clips</option><option value={4}>4 clips</option><option value={5}>5 clips</option><option value={6}>6 clips</option><option value={7}>7 clips</option><option value={8}>8 clips</option></select></label><label>Clip duration<select value={clipSeconds} onChange={e=>setClipSeconds(Number(e.target.value))}><option value={10}>10 seconds</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option><option value={60}>60 seconds</option><option value={90}>90 seconds</option></select></label></div>
+      <div className="processing-options"><label>Number of clips<select value={count} onChange={e=>setCount(Number(e.target.value))}><option value={1}>1 clip</option><option value={2}>2 clips</option><option value={3}>3 clips</option><option value={4}>4 clips</option><option value={5}>5 clips</option><option value={6}>6 clips</option><option value={7}>7 clips</option><option value={8}>8 clips</option></select></label><label>Clip duration<select value={clipSeconds} onChange={e=>setClipSeconds(Number(e.target.value))}><option value={10}>10 seconds</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option><option value={60}>60 seconds</option><option value={90}>90 seconds</option></select></label></div>\n      <div className="processing-options advanced-options"><label>Aspect ratio<select value={aspectRatio} onChange={e=>setAspectRatio(e.target.value)}><option value="9:16">9:16 · Shorts / Reels / TikTok</option><option value="16:9">16:9 · YouTube</option><option value="1:1">1:1 · Square</option></select></label><label>Video type<select value={videoType} onChange={e=>setVideoType(e.target.value)}><option value="auto">Auto detect</option><option value="podcast">Podcast / Interview</option><option value="gaming">Gaming</option><option value="educational">Educational</option><option value="motivation">Motivation</option><option value="story">Storytelling</option></select></label><label className="caption-toggle"><input type="checkbox" checked={captions} onChange={e=>setCaptions(e.target.checked)}/> Captions on</label></div>
       {source==='upload'?<div className={'dropzone '+(file?'has-file':'')} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();chooseFile(e.dataTransfer.files?.[0])}} onClick={()=>inputRef.current?.click()}><input ref={inputRef} type="file" accept="video/*" hidden onChange={e=>chooseFile(e.target.files?.[0])}/><div className="upload-icon">{file?<Check size={22}/>:<CloudUpload size={23}/>}</div><b>{file?file.name:'Drag & drop your video here'}</b><span>{file?(file.size/1024/1024).toFixed(1)+' MB · Ready to process':'or click to browse files'}</span><small>MP4, MOV, MKV, WEBM</small></div>:<div className="link-field"><div className="link-icon"><Link2 size={18}/></div><input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://youtube.com/watch?v=..."/><button onClick={start}>Use link <ArrowUpRight size={14}/></button></div>}
       <div className="card-footer"><div className="secure-note"><span className="secure-dot"/>{API_BASE?'Connected API: '+API_BASE:'Set processing API in Settings'}</div><button className="primary-button" onClick={start} disabled={busy}>{busy?'Processing…':<>Create clips <ArrowUpRight size={16}/></>}</button></div>
       {notice&&<motion.div className="notice"><span>{notice}</span><button onClick={()=>setNotice('')}><X size={14}/></button></motion.div>}
