@@ -62,3 +62,17 @@ The default Whisper model is `tiny` and runs on CPU. On older computers, transcr
 - Frontend: React, Vite, Framer Motion, Lucide
 - Backend: FastAPI, yt-dlp, faster-whisper, FFmpeg
 - Local runtime: Docker Compose
+
+
+## Studio dashboard update
+
+The `feature/clipflow-studio` branch adds working Overview, My projects, Clip editor preview, and Settings views. Project metadata is saved in the current browser's local storage; exported MP4 files remain in the local Docker data volume. Clearing browser history does not delete exported videos.
+
+The first editor view supports selecting, previewing, and downloading generated clips. Timeline trimming, changing caption styles, accounts, cloud sync, and automatic publishing are not included yet.
+
+## Local safety notes
+
+- Docker publishes the API on `127.0.0.1:8000`, not on every network interface.
+- Uploads are limited to 2 GB and checked by FFprobe before processing.
+- URL downloads accept HTTPS YouTube / youtu.be hostnames only and reject hostnames resolving to non-public IP addresses.
+- This is a local single-user prototype, not a public multi-user service. Do not expose port 8000 to the internet.
