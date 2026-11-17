@@ -294,7 +294,7 @@ function App() {
                     <button className={source === 'link' ? 'selected' : ''} onClick={() => setSource('link')}><Link2 size={15} /> Paste a link</button>
                   </div>
                   <div className="processing-options">
-                    <label>Number of clips<select value={count} onChange={event => setCount(Number(event.target.value))}><option value={2}>2 clips</option><option value={3}>3 clips</option><option value={4}>4 clips</option><option value={5}>5 clips</option}</select></label>
+                    <label>Number of clips<select value={count} onChange={event => setCount(Number(event.target.value))}><option value={2}>2 clips</option><option value={3}>3 clips</option><option value={4}>4 clips</option><option value={5}>5 clips</option></select></label>
                     <label>Clip duration<select value={clipSeconds} onChange={event => setClipSeconds(Number(event.target.value))}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option><option value={60}>60 seconds</option></select></label>
                   </div>
                   {source === 'upload' ? (
