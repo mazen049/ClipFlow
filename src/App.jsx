@@ -8,7 +8,7 @@ import {
   Monitor, ShieldCheck, Video, Search, ExternalLink
 } from 'lucide-react'
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001'
 const STORAGE_KEY = 'clipflow.projects.v1'
 const SETTINGS_KEY = 'clipflow.settings.v1'
 const nav = [
@@ -296,6 +296,12 @@ function App() {
                   <div className="processing-options">
                     <label>Number of clips<select value={count} onChange={event => setCount(Number(event.target.value))}><option value={2}>2 clips</option><option value={3}>3 clips</option><option value={4}>4 clips</option><option value={5}>5 clips</option></select></label>
                     <label>Clip duration<select value={clipSeconds} onChange={event => setClipSeconds(Number(event.target.value))}><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={45}>45 seconds</option><option value={60}>60 seconds</option></select></label>
+                  </div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:8,margin:'0 0 14px',padding:'12px 14px',border:'1px solid rgba(151,132,211,.28)',borderRadius:10,background:'rgba(25,23,42,.62)'}}>
+                    <span style={{fontSize:10,color:'#cfc4ff'}}>AUTO EDITING</span>
+                    <span style={{fontSize:10,color:'#b8c9c2'}}>✓ Automatic visual style</span>
+                    <span style={{fontSize:10,color:'#b8c9c2'}}>✓ Word-by-word captions</span>
+                    <span style={{fontSize:10,color:'#b8c9c2'}}>✓ Vertical 9:16 MP4</span>
                   </div>
                   {source === 'upload' ? (
                     <div className={'dropzone ' + (file ? 'has-file' : '')} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); chooseFile(event.dataTransfer.files?.[0]) }} onClick={() => inputRef.current?.click()}>
