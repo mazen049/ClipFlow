@@ -92,12 +92,26 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
     try:
         from faster_whisper import WhisperModel
         model = WhisperModel(os.getenv("WHISPER_MODEL", "tiny"), device="cpu", compute_type="int8")
-        segments, _ = model.transcribe(str(path), vad_filter=True, word_timestamps=False)
+        segments, _ = model.transcribe(str(path), vad_filter=True, word_timestamps=True)
         transcript = []
         for seg in segments:
             text = re.sub(r"\s+", " ", seg.text).strip()
             if text:
-                transcript.append({"start": float(seg.start), "end": float(seg.end), "text": text})
+                word_items = []
+                for word in (getattr(seg, "words", None) or []):
+                    word_text = re.sub(r"\s+", " ", (word.word or "")).strip()
+                    if word_text and word.start is not None and word.end is not None:
+                        word_items.append({
+                            "start": float(word.start),
+                            "end": float(word.end),
+                            "text": word_text
+                        })
+                transcript.append({
+                    "start": float(seg.start),
+                    "end": float(seg.end),
+                    "text": text,
+                    "words": word_items
+                })
         if transcript:
             candidates = []
             for item in transcript:
@@ -116,14 +130,22 @@ def choose_highlights(path: Path, duration: float, count: int, clip_seconds: int
                 clip_length = min(clip_seconds, duration - start)
                 captions = []
                 for spoken in transcript:
-                    cap_start = max(start, spoken["start"])
-                    cap_end = min(start + clip_length, spoken["end"])
-                    if cap_end - cap_start >= 0.35:
-                        captions.append({
-                            "start": round(cap_start - start, 3),
-                            "end": round(cap_end - start, 3),
-                            "text": spoken["text"]
-                        })
+                    # Prefer true word timestamps so captions appear one word at a time.
+                    spoken_words = spoken.get("words") or [{
+                        "start": spoken["start"],
+                        "end": spoken["end"],
+                        "text": spoken["text"]
+                    }]
+                    for spoken_word in spoken_words:
+                        cap_start = max(start, spoken_word["start"])
+                        cap_end = min(start + clip_length, spoken_word["end"])
+                        if cap_end - cap_start >= 0.08:
+                            captions.append({
+                                "start": round(cap_start - start, 3),
+                                "end": round(cap_end - start, 3),
+                                "text": spoken_word["text"]
+                            })
+                captions.sort(key=lambda item: item["start"])
                 candidates.append((score, start, text, captions))
             candidates.sort(key=lambda item: item[0], reverse=True)
             selected = []
@@ -177,7 +199,7 @@ def render_clip(source: Path, destination: Path, start: float, length: float, ti
             text = re.sub(r"\s+", " ", caption["text"]).strip().replace("-->", "→")
             entries.append(f"{index}\n{stamp(start_ms)} --> {stamp(end_ms)}\n{text}\n")
         srt.write_text("\n".join(entries), encoding="utf-8")
-        style = "FontName=DejaVu Sans,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=150"
+        style = "FontName=DejaVu Sans,FontSize=34,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=1,Alignment=2,MarginV=220"
         subtitle_filter = "subtitles=" + str(srt) + ":force_style='" + style + "'"
     dimensions = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
     width, height = dimensions.get(aspect_ratio, (1080, 1920))
